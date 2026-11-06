@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Modalità auto</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Auto">
+<meta name="theme-color" content="#000000">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: rgba(11, 13, 16, 0.92);
+    --text: #f2f4f7;
+    --muted: #9aa3ad;
+    --waze: #33ccff;
+    --maps: #34c759;
+    --spotify: #1ed760;
+    --phone: #0a84ff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Helvetica Neue", sans-serif;
+    overflow: hidden; touch-action: manipulation;
+  }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: row; }
+  #map { flex: 1; height: 100%; background: #1a1d21; }
+
+  #panel {
+    width: 210px; flex-shrink: 0; height: 100%;
+    background: var(--panel);
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 12px) calc(env(safe-area-inset-bottom, 0px) + 12px) 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #clock { font-size: 52px; font-weight: 700; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
+  #speed { text-align: center; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #speed small { font-size: 15px; color: var(--muted); font-weight: 500; }
+  #status { text-align: center; font-size: 13px; color: var(--muted); min-height: 16px; }
+
+  .btn {
+    display: flex; align-items: center; gap: 10px;
+    flex: 1; min-height: 52px;
+    padding: 0 14px; border-radius: 16px;
+    color: #fff; text-decoration: none; font-size: 19px; font-weight: 600;
+    border: 0; font-family: inherit; cursor: pointer;
+  }
+  .btn:active { transform: scale(0.97); filter: brightness(1.15); }
+  .btn svg { width: 24px; height: 24px; flex-shrink: 0; fill: currentColor; }
+  .waze { background: #0e7fa8; }
+  .maps { background: #1f8a3e; }
+  .spotify { background: #178a42; }
+  .phone { background: #1566c0; }
+  .center { background: #2b3138; font-size: 16px; flex: 0 0 auto; min-height: 44px; }
+
+  /* Schermata di avvio: serve un tocco per attivare GPS e schermo sempre acceso */
+  #start {
+    position: fixed; inset: 0; z-index: 2000; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+    padding: 24px; text-align: center;
+  }
+  #start h1 { margin: 0; font-size: 30px; }
+  #start p { margin: 0; color: var(--muted); max-width: 420px; line-height: 1.4; font-size: 16px; }
+  #start button {
+    font-size: 22px; font-weight: 700; padding: 16px 40px; border-radius: 18px;
+    border: 0; background: var(--phone); color: #fff; font-family: inherit;
+  }
+  #start.hidden { display: none; }
+
+  /* Telefono tenuto in verticale: pannello in basso */
+  @media (orientation: portrait) {
+    #app { flex-direction: column; }
+    #panel {
+      width: 100%; height: auto;
+      padding: 12px calc(env(safe-area-inset-right, 0px) + 12px) calc(env(safe-area-inset-bottom, 0px) + 12px) calc(env(safe-area-inset-left, 0px) + 12px);
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    }
+    #clock, #speed, #status { grid-column: span 1; }
+    #status { grid-column: span 2; }
+    .btn { min-height: 56px; }
+    .center { grid-column: span 2; }
+  }
+
+  .leaflet-container { font-family: inherit; }
+  .leaflet-control-attribution { font-size: 10px; }
+  .me {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #0a84ff; border: 3px solid #fff;
+    box-shadow: 0 0 0 6px rgba(10,132,255,0.3);
+  }
+</style>
+</head>
+<body>
+
+<div id="start">
+  <h1>Modalità auto</h1>
+  <p>Tocca il pulsante per attivare la posizione e tenere lo schermo sempre acceso. Quando ti chiede il permesso, scegli <b>Consenti</b>.</p>
+  <button id="startBtn">Avvia</button>
+</div>
+
+<div id="app">
+  <div id="map"></div>
+  <div id="panel">
+    <div id="clock">--:--</div>
+    <div id="speed">0 <small>km/h</small></div>
+    <div id="status"></div>
+
+    <a class="btn waze" href="waze://">
+      <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.500a2.500 2.500 0 0 1 0 5z"/></svg>
+      Waze
+    </a>
+    <a class="btn maps" href="https://maps.apple.com/">
+      <svg viewBox="0 0 24 24"><path d="M9 3 3 5.500v15.500l6-2.500 6 2.500 6-2.500V3l-6 2.500L9 3zm0 2.500 .1 11.800L5 19V7l4-1.500zm6 1 4 1.500v12l-4 1.600V6.500z"/></svg>
+      Mappe
+    </a>
+    <a class="btn spotify" href="spotify://">
+      <svg viewBox="0 0 24 24"><path d="M9 17.500a3 3 0 1 1-2-2.800V5l12-2v11.500a3 3 0 1 1-2-2.800V6.300L9 7.700v9.800z"/></svg>
+      Spotify
+    </a>
+    <a class="btn phone" href="tel:">
+      <svg viewBox="0 0 24 24"><path d="M6.600 10.800a15 15 0 0 0 6.600 6.600l2.200-2.200a1 1 0 0 1 1-.25 11.400 11.400 0 0 0 3.600.6 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.500a1 1 0 0 1 1 1c0 1.300.2 2.500.6 3.600a1 1 0 0 1-.25 1l-2.250 2.200z"/></svg>
+      Telefono
+    </a>
+    <button class="btn center" id="recenter">Centra sulla mia posizione</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  var map = L.map('map', { zoomControl: false, attributionControl: true }).setView([42.46, 14.21], 15);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+    subdomains: 'abcd',
+    attribution: '&copy; OpenStreetMap &copy; CARTO'
+  }).addTo(map);
+
+  var marker = L.marker([42.46, 14.21], {
+    icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [22, 22], iconAnchor: [11, 11] })
+  });
+  var hasFix = false;
+  var follow = true;
+
+  var statusEl = document.getElementById('status');
+  var speedEl = document.getElementById('speed');
+  var clockEl = document.getElementById('clock');
+
+  // Se sposti la mappa con il dito, smette di seguirti finché non tocchi "Centra"
+  map.on('dragstart', function () { follow = false; });
+  document.getElementById('recenter').addEventListener('click', function () {
+    follow = true;
+    if (hasFix) map.setView(marker.getLatLng(), Math.max(map.getZoom(), 16));
+  });
+
+  // Orologio
+  function tick() {
+    var d = new Date();
+    var h = String(d.getHours()).padStart(2, '0');
+    var m = String(d.getMinutes()).padStart(2, '0');
+    clockEl.textContent = h + ':' + m;
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  // Posizione e velocità
+  function onPosition(pos) {
+    var lat = pos.coords.latitude, lng = pos.coords.longitude;
+    var ll = [lat, lng];
+    if (!hasFix) {
+      hasFix = true;
+      marker.setLatLng(ll).addTo(map);
+      map.setView(ll, 16);
+      statusEl.textContent = '';
+    } else {
+      marker.setLatLng(ll);
+      if (follow) map.panTo(ll, { animate: true });
+    }
+    var s = pos.coords.speed; // metri al secondo, può essere null
+    var kmh = (s !== null && s > 0) ? Math.round(s * 3.6) : 0;
+    speedEl.innerHTML = kmh + ' <small>km/h</small>';
+  }
+
+  function onError(err) {
+    if (err.code === 1) {
+      statusEl.textContent = 'Posizione negata. Attivala in Impostazioni > Safari > Posizione.';
+    } else {
+      statusEl.textContent = 'Segnale GPS debole.';
+    }
+  }
+
+  // Schermo sempre acceso
+  var wakeLock = null;
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch (e) { /* non supportato: nessun problema */ }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') keepAwake();
+  });
+
+  // Avvio con un tocco (iOS richiede un gesto dell'utente)
+  document.getElementById('startBtn').addEventListener('click', function () {
+    document.getElementById('start').classList.add('hidden');
+    statusEl.textContent = 'Cerco la posizione…';
+    keepAwake();
+    if ('geolocation' in navigator) {
+      navigator.geolocation.watchPosition(onPosition, onError, {
+        enableHighAccuracy: true, maximumAge: 1000, timeout: 20000
+      });
+    } else {
+      statusEl.textContent = 'Posizione non disponibile su questo dispositivo.';
+    }
+    setTimeout(function () { map.invalidateSize(); }, 200);
+  });
+
+  window.addEventListener('resize', function () { map.invalidateSize(); });
+  window.addEventListener('orientationchange', function () {
+    setTimeout(function () { map.invalidateSize(); }, 300);
+  });
+})();
+</script>
+</body>
+</html>
